@@ -1682,16 +1682,25 @@ class PostsViewList:
         )
         if not bnt_like_obj.exists():
             # Reels: filter out the Notes heart reusing the id.
-            reels_like = find_reels_like_button(self.device)
-            if reels_like.exists(Timeout.SHORT):
-                is_liked = OpenedPostView._like_button_is_liked(reels_like)
-                logger.debug(f"Reels like_button is_liked={is_liked}")
-                if is_liked:
-                    logger.debug("Like is present.")
-                    return True
+            # The sidebar heart updates asynchronously after the like
+            # animation; retry with hard sleeps (not modulable) to
+            # avoid false negatives that would undo a working like.
+            for retry in range(3):
+                reels_like = find_reels_like_button(self.device)
+                if reels_like.exists(Timeout.SHORT):
+                    is_liked = OpenedPostView._like_button_is_liked(reels_like)
+                    logger.debug(
+                        f"Reels like_button is_liked={is_liked} (retry {retry})"
+                    )
+                    if is_liked:
+                        logger.debug("Like is present.")
+                        return True
+                    if retry < 2:
+                        sleep(1.5)
                 else:
-                    logger.debug("Like is not present.")
-                    return False
+                    break
+            logger.debug("Like is not present (Reels).")
+            return False
         if bnt_like_obj.exists():
             STR = "Liked"
             if self.device.find(descriptionMatches=case_insensitive_re(STR)).exists():
