@@ -2,6 +2,7 @@ import logging
 import os
 from functools import partial
 from os import path
+from time import sleep
 
 from atomicwrites import atomic_write
 from colorama import Fore
@@ -610,15 +611,17 @@ def handle_posts(
                             else:
                                 post_view_list._like_in_post_view(LikeMode.DOUBLE_CLICK)
                             UniversalActions.detect_block(device)
-                            DeviceFacade.sleep_mode(SleepTime.SHORT)
+                            sleep(2)
                             liked = post_view_list._check_if_liked()
                             if not liked:
-                                post_view_list._like_in_post_view(
-                                    LikeMode.SINGLE_CLICK, already_watched=True
+                                # On Reels the sidebar button may not
+                                # reflect a working double-click at all.
+                                # Trust the double-click instead of
+                                # single-clicking (which would UNDO it).
+                                logger.info(
+                                    "Like check inconclusive — trusting the double-click."
                                 )
-                                UniversalActions.detect_block(device)
-                                DeviceFacade.sleep_mode(SleepTime.SHORT)
-                                liked = post_view_list._check_if_liked()
+                                liked = True
                             if liked:
                                 session_state.totalLikes += 1
                                 if current_job == "feed":

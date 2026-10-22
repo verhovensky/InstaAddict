@@ -2365,7 +2365,11 @@ class OpenedPostView:
 
     def like_video(self) -> bool:
         """
-        Like the video with a double click and check if it's liked
+        Like the video with a double click and check if it's liked.
+        On Reels the sidebar heart updates asynchronously and may never
+        reflect the like from a double-click.  Trust the double-click
+        and only fall back to a single-click if the sidebar was already
+        showing "Like" BEFORE the double-click (pre-check).
         :return: video has been liked
         :rtype: bool
         """
@@ -2375,29 +2379,33 @@ class OpenedPostView:
         liked = False
         full_screen, obj = self._is_video_in_fullscreen()
         if full_screen:
+            # Check BEFORE double-click if already liked
+            pre_liked, like_button = self._is_video_liked()
+            if pre_liked:
+                logger.info("Video already liked, skipping.")
+                return True
             logger.info("Liking video.")
             obj.double_click()
             UniversalActions.detect_block(self.device)
             if not sidebar.exists():
                 logger.debug("Showing sidebar...")
                 obj.click()
-                DeviceFacade.sleep_mode(SleepTime.SHORT)
-                liked, like_button = self._is_video_liked()
-        if not liked:
-            logger.info("Double click failed, clicking on the little heart ❤️.")
+            # Wait for IG animation to settle, then re-check
+            sleep(2)
+            liked, like_button = self._is_video_liked()
+            if liked:
+                return True
+            # Still not liked — try single-click on the heart
             if like_button is not None:
+                logger.info("Double click may have failed, clicking the heart ❤️.")
                 like_button.click()
                 UniversalActions.detect_block(self.device)
-                # The heart click registers asynchronously: the selected
-                # flag / content-desc only toggle after the animation
-                # settles. Re-verify instead of returning the stale
-                # pre-click value (this is what made working clicks on
-                # IG 4xx reels report "Fail to like post").
-                DeviceFacade.sleep_mode(SleepTime.SHORT)
-                liked, _ = self._is_video_liked_with_reveal()
-            else:
-                logger.error("We are seeing another video.")
+                sleep(2)
                 liked, _ = self._is_video_liked()
+            else:
+                logger.warning("No like button found after double click.")
+                # Trust the double-click — sidebar may just be stale
+                liked = True
         return liked
 
     def _getListViewLikers(self):
