@@ -8,7 +8,7 @@ from colorama import Fore
 
 from InstaAddict.plugins.telegram import load_telegram_config, telegram_bot_send_photo
 
-from InstaAddict.core.device_facade import DeviceFacade, Direction, Timeout
+from InstaAddict.core.device_facade import DeviceFacade, Direction, SleepTime, Timeout
 from InstaAddict.core.navigation import (
     nav_to_blogger,
     nav_to_feed,
@@ -610,12 +610,14 @@ def handle_posts(
                             else:
                                 post_view_list._like_in_post_view(LikeMode.DOUBLE_CLICK)
                             UniversalActions.detect_block(device)
+                            DeviceFacade.sleep_mode(SleepTime.SHORT)
                             liked = post_view_list._check_if_liked()
                             if not liked:
                                 post_view_list._like_in_post_view(
                                     LikeMode.SINGLE_CLICK, already_watched=True
                                 )
                                 UniversalActions.detect_block(device)
+                                DeviceFacade.sleep_mode(SleepTime.SHORT)
                                 liked = post_view_list._check_if_liked()
                             if liked:
                                 session_state.totalLikes += 1

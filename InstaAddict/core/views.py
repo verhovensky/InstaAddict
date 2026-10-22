@@ -1681,13 +1681,12 @@ class PostsViewList:
             resourceIdMatches=ResourceID.ROW_FEED_BUTTON_LIKE
         )
         if not bnt_like_obj.exists():
-            # Reels: like_button uses selected=true when liked (not
-            # content-desc). Filter out the Notes heart reusing the id.
+            # Reels: filter out the Notes heart reusing the id.
             reels_like = find_reels_like_button(self.device)
             if reels_like.exists(Timeout.SHORT):
-                is_selected = reels_like.get_selected()
-                logger.debug(f"Reels like_button selected={is_selected}")
-                if is_selected:
+                is_liked = OpenedPostView._like_button_is_liked(reels_like)
+                logger.debug(f"Reels like_button is_liked={is_liked}")
+                if is_liked:
                     logger.debug("Like is present.")
                     return True
                 else:
@@ -2162,6 +2161,21 @@ class OpenedPostView:
             return reels_like
         return None
 
+    @staticmethod
+    def _like_button_is_liked(like_button) -> bool:
+        """The heart signals its state via the selected flag and, on newer
+        layouts, via a content-desc of "Liked" instead of "Like"."""
+        try:
+            if like_button.get_selected():
+                return True
+        except DeviceFacade.JsonRpcError:
+            pass
+        try:
+            desc = (like_button.get_desc() or "").strip().lower()
+        except DeviceFacade.JsonRpcError:
+            desc = ""
+        return desc == "liked"
+
     def _is_post_liked(self) -> Tuple[Optional[bool], Optional[DeviceFacade.View]]:
         """
         Check if post is liked
@@ -2172,7 +2186,7 @@ class OpenedPostView:
         if not like_btn_view:
             return False, None
 
-        return like_btn_view.get_selected(), like_btn_view
+        return self._like_button_is_liked(like_btn_view), like_btn_view
 
     def like_post(self) -> bool:
         """
@@ -2330,7 +2344,7 @@ class OpenedPostView:
         """
         like_button = find_reels_like_button(self.device)
         if like_button.exists():
-            return like_button.get_selected(), like_button
+            return OpenedPostView._like_button_is_liked(like_button), like_button
         return False, None
 
     def _has_tags(self) -> bool:
