@@ -1682,23 +1682,16 @@ class PostsViewList:
         )
         if not bnt_like_obj.exists():
             # Reels: filter out the Notes heart reusing the id.
-            # The sidebar heart updates asynchronously after the like
-            # animation; retry with hard sleeps (not modulable) to
-            # avoid false negatives that would undo a working like.
-            for retry in range(3):
-                reels_like = find_reels_like_button(self.device)
-                if reels_like.exists(Timeout.SHORT):
-                    is_liked = OpenedPostView._like_button_is_liked(reels_like)
-                    logger.debug(
-                        f"Reels like_button is_liked={is_liked} (retry {retry})"
-                    )
-                    if is_liked:
-                        logger.debug("Like is present.")
-                        return True
-                    if retry < 2:
-                        sleep(1.5)
-                else:
-                    break
+            # Wait up to 3 s for the sidebar heart to flip to "Liked".
+            liked_button = self.device.find(
+                resourceIdMatches=case_insensitive_re(ResourceID.LIKE_BUTTON),
+                descriptionMatches=case_insensitive_re("^Liked$"),
+            )
+            appeared = liked_button.wait(Timeout.SHORT)
+            logger.debug(f"Reels liked_button appeared={appeared}")
+            if appeared:
+                logger.debug("Like is present.")
+                return True
             logger.debug("Like is not present (Reels).")
             return False
         if bnt_like_obj.exists():
@@ -2170,21 +2163,6 @@ class OpenedPostView:
             return reels_like
         return None
 
-    @staticmethod
-    def _like_button_is_liked(like_button) -> bool:
-        """The heart signals its state via the selected flag and, on newer
-        layouts, via a content-desc of "Liked" instead of "Like"."""
-        try:
-            if like_button.get_selected():
-                return True
-        except DeviceFacade.JsonRpcError:
-            pass
-        try:
-            desc = (like_button.get_desc() or "").strip().lower()
-        except DeviceFacade.JsonRpcError:
-            desc = ""
-        return desc == "liked"
-
     def _is_post_liked(self) -> Tuple[Optional[bool], Optional[DeviceFacade.View]]:
         """
         Check if post is liked
@@ -2195,7 +2173,7 @@ class OpenedPostView:
         if not like_btn_view:
             return False, None
 
-        return self._like_button_is_liked(like_btn_view), like_btn_view
+        return like_btn_view.get_selected(), like_btn_view
 
     def like_post(self) -> bool:
         """
@@ -2217,7 +2195,7 @@ class OpenedPostView:
                 like_button.click()
                 UniversalActions.detect_block(self.device)
                 DeviceFacade.sleep_mode(SleepTime.SHORT)
-                liked = self._like_button_is_liked(like_button)
+                liked = like_button.get_selected()
             else:
                 logger.error("Can't find the media container nor the like button!")
         else:
@@ -2231,7 +2209,7 @@ class OpenedPostView:
                     like_button.click()
                     UniversalActions.detect_block(self.device)
                     DeviceFacade.sleep_mode(SleepTime.SHORT)
-                    liked = self._like_button_is_liked(like_button)
+                    liked = like_button.get_selected()
                 else:
                     logger.warning("Can't find the like button object!")
             else:
@@ -2353,8 +2331,21 @@ class OpenedPostView:
         """
         like_button = find_reels_like_button(self.device)
         if like_button.exists():
-            return OpenedPostView._like_button_is_liked(like_button), like_button
+            return like_button.get_selected(), like_button
         return False, None
+
+    def _is_video_liked_with_reveal(self) -> Tuple[Optional[bool], Optional[DeviceFacade.View]]:
+        """Check if video is liked, revealing chrome if needed."""
+        liked, like_button = self._is_video_liked()
+        if like_button is not None:
+            return liked, like_button
+        # Chrome may be hidden on Reels - tap to reveal
+        full_screen, video = self._is_video_in_fullscreen()
+        if full_screen:
+            video.click()  # reveal chrome
+            sleep(1)  # SHORT sleep for chrome to appear
+            liked, like_button = self._is_video_liked()
+        return liked, like_button
 
     def _has_tags(self) -> bool:
         tags_icon = self.device.find(
@@ -2365,48 +2356,68 @@ class OpenedPostView:
 
     def like_video(self) -> bool:
         """
-        Like the video with a double click and check if it's liked.
-        On Reels the sidebar heart updates asynchronously and may never
-        reflect the like from a double-click.  Trust the double-click
-        and only fall back to a single-click if the sidebar was already
-        showing "Like" BEFORE the double-click (pre-check).
+        Like the video with a double click.
+        On Reels the sidebar heart is unreliable — it may not update
+        contentDescription after a double-click for many seconds (or ever).
+        Therefore we TRUST the double-click and NEVER single-click the
+        heart as fallback (that would undo the like).
         :return: video has been liked
         :rtype: bool
         """
-        sidebar = self.device.find(
-            resourceIdMatches=case_insensitive_re(ResourceID.UFI_STACK)
-        )
-        liked = False
         full_screen, obj = self._is_video_in_fullscreen()
-        if full_screen:
-            # Check BEFORE double-click if already liked
-            pre_liked, like_button = self._is_video_liked()
-            if pre_liked:
-                logger.info("Video already liked, skipping.")
-                return True
-            logger.info("Liking video.")
-            obj.double_click()
-            UniversalActions.detect_block(self.device)
-            if not sidebar.exists():
-                logger.debug("Showing sidebar...")
-                obj.click()
-            # Wait for IG animation to settle, then re-check
-            sleep(2)
-            liked, like_button = self._is_video_liked()
-            if liked:
-                return True
-            # Still not liked — try single-click on the heart
-            if like_button is not None:
-                logger.info("Double click may have failed, clicking the heart ❤️.")
-                like_button.click()
-                UniversalActions.detect_block(self.device)
-                sleep(2)
-                liked, _ = self._is_video_liked()
-            else:
-                logger.warning("No like button found after double click.")
-                # Trust the double-click — sidebar may just be stale
-                liked = True
-        return liked
+        if not full_screen:
+            logger.debug("like_video: not fullscreen, skip")
+            return False
+
+        # 1. Pre-check: already liked?
+        pre_liked, pre_btn = self._is_video_liked_with_reveal()
+        if pre_btn is not None:
+            pre_info = pre_btn.viewV2.info
+            logger.debug(
+                f"like_video PRE-CHECK: desc='{pre_info.get('contentDescription')}' "
+                f"selected={pre_info.get('selected')}"
+            )
+        else:
+            logger.debug("like_video PRE-CHECK: like button NOT found")
+        if pre_liked:
+            logger.info("Video already liked, skipping.")
+            return True
+
+        # 2. Double-click to like
+        logger.info("Liking video.")
+        obj.double_click()
+        UniversalActions.detect_block(self.device)
+
+        # 3. Wait for sidebar to flip to "Liked" (up to 5s)
+        liked_selector = self.device.find(
+            resourceIdMatches=case_insensitive_re(ResourceID.LIKE_BUTTON),
+            descriptionMatches=case_insensitive_re("^Liked$"),
+        )
+        appeared = liked_selector.wait(Timeout.MEDIUM)
+        logger.debug(f"like_video: wait for 'Liked' appeared={appeared}")
+        if appeared:
+            return True
+
+        # 4. Reveal chrome and read raw button state
+        post_liked, post_btn = self._is_video_liked_with_reveal()
+        if post_btn is not None:
+            post_info = post_btn.viewV2.info
+            logger.debug(
+                f"like_video POST-CHECK: desc='{post_info.get('contentDescription')}' "
+                f"selected={post_info.get('selected')}"
+            )
+        else:
+            logger.debug("like_video POST-CHECK: like button NOT found")
+        if post_liked:
+            return True
+
+        # 5. Sidebar still says "Like" — but do NOT click it!
+        #    Double-click most likely worked; sidebar is just stale.
+        logger.info(
+            "like_video: sidebar still shows 'Like' after double-click. "
+            "Trusting double-click (known Reels sidebar lag)."
+        )
+        return True
 
     def _getListViewLikers(self):
         for _ in range(2):

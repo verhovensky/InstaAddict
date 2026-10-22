@@ -703,7 +703,12 @@ class DeviceFacade:
                 if self.viewV2.exists():
                     info = self.viewV2.info
                     logger.debug(f"DEBUG like button info {info}")
-                    return info["selected"]
+                    desc = (info.get("contentDescription") or "").strip().lower()
+                    if desc == "liked":
+                        return True
+                    if desc == "like":
+                        return False
+                    return info["selected"]  # fallback for non-like buttons
                 logger.debug(
                     "Object has disappeared! Probably too short video which has been liked!"
                 )

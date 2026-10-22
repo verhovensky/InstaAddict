@@ -36,6 +36,7 @@ from InstaAddict.core.views import (
     TabBarView,
     UniversalActions,
     case_insensitive_re,
+    find_reels_like_button,
 )
 
 logger = logging.getLogger(__name__)
@@ -611,17 +612,37 @@ def handle_posts(
                             else:
                                 post_view_list._like_in_post_view(LikeMode.DOUBLE_CLICK)
                             UniversalActions.detect_block(device)
-                            sleep(2)
-                            liked = post_view_list._check_if_liked()
-                            if not liked:
-                                # On Reels the sidebar button may not
-                                # reflect a working double-click at all.
-                                # Trust the double-click instead of
-                                # single-clicking (which would UNDO it).
-                                logger.info(
-                                    "Like check inconclusive — trusting the double-click."
+                            is_reels = opened_post_view._is_video_in_fullscreen()[0]
+                            if is_reels:
+                                # Reels: log raw button state, wait longer, trust double-click
+                                liked_button = find_reels_like_button(device)
+                                if liked_button.exists():
+                                    btn_info = liked_button.viewV2.info
+                                    logger.debug(
+                                        f"handle_sources REELS POST-LIKE: desc='{btn_info.get('contentDescription')}' "
+                                        f"selected={btn_info.get('selected')}"
+                                    )
+                                else:
+                                    logger.debug("handle_sources REELS POST-LIKE: like button NOT found")
+                                liked_selector = device.find(
+                                    resourceIdMatches=case_insensitive_re(ResourceID.LIKE_BUTTON),
+                                    descriptionMatches=case_insensitive_re("^Liked$"),
                                 )
-                                liked = True
+                                liked = liked_selector.wait(Timeout.MEDIUM)
+                                if not liked:
+                                    liked = post_view_list._check_if_liked()
+                                if not liked:
+                                    logger.info(
+                                        "Reels like check inconclusive — trusting the double-click."
+                                    )
+                                    liked = True
+                            else:
+                                # Feed posts: normal check with single-click fallback
+                                liked = post_view_list._check_if_liked()
+                                if not liked:
+                                    post_view_list._like_in_post_view(LikeMode.SINGLE_CLICK)
+                                    UniversalActions.detect_block(device)
+                                    liked = post_view_list._check_if_liked()
                             if liked:
                                 session_state.totalLikes += 1
                                 if current_job == "feed":
