@@ -607,37 +607,18 @@ def handle_posts(
                         if not session_state.check_limit(
                             limit_type=session_state.Limit.LIKES, output=True
                         ):
-                            if has_tags:
-                                post_view_list._like_in_post_view(LikeMode.SINGLE_CLICK)
-                            else:
-                                post_view_list._like_in_post_view(LikeMode.DOUBLE_CLICK)
-                            UniversalActions.detect_block(device)
                             is_reels = opened_post_view._is_video_in_fullscreen()[0]
                             if is_reels:
-                                # Reels: log raw button state, wait longer, trust double-click
-                                liked_button = find_reels_like_button(device)
-                                if liked_button.exists():
-                                    btn_info = liked_button.viewV2.info
-                                    logger.debug(
-                                        f"handle_sources REELS POST-LIKE: desc='{btn_info.get('contentDescription')}' "
-                                        f"selected={btn_info.get('selected')}"
-                                    )
-                                else:
-                                    logger.debug("handle_sources REELS POST-LIKE: like button NOT found")
-                                liked_selector = device.find(
-                                    resourceIdMatches=case_insensitive_re(ResourceID.LIKE_BUTTON),
-                                    descriptionMatches=case_insensitive_re("^Liked$"),
-                                )
-                                liked = liked_selector.wait(Timeout.MEDIUM)
-                                if not liked:
-                                    liked = post_view_list._check_if_liked()
-                                if not liked:
-                                    logger.info(
-                                        "Reels like check inconclusive — trusting the double-click."
-                                    )
-                                    liked = True
+                                # Reels: use like_video() which handles everything:
+                                # double-click, screenshot check, wait, trust
+                                liked = opened_post_view.like_video()
                             else:
-                                # Feed posts: normal check with single-click fallback
+                                # Feed posts: _like_in_post_view + single-click fallback
+                                if has_tags:
+                                    post_view_list._like_in_post_view(LikeMode.SINGLE_CLICK)
+                                else:
+                                    post_view_list._like_in_post_view(LikeMode.DOUBLE_CLICK)
+                                UniversalActions.detect_block(device)
                                 liked = post_view_list._check_if_liked()
                                 if not liked:
                                     post_view_list._like_in_post_view(LikeMode.SINGLE_CLICK)

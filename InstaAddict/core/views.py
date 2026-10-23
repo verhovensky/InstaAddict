@@ -2347,6 +2347,14 @@ class OpenedPostView:
             liked, like_button = self._is_video_liked()
         return liked, like_button
 
+    def _check_if_liked_by_screenshot(self) -> Optional[bool]:
+        """Screenshot-based like verification for Reels."""
+        like_button = find_reels_like_button(self.device)
+        if not like_button.exists():
+            logger.debug("_check_if_liked_by_screenshot: like button not found")
+            return None
+        return DeviceFacade.is_heart_liked_by_screenshot(self.device, like_button)
+
     def _has_tags(self) -> bool:
         tags_icon = self.device.find(
             resourceIdMatches=case_insensitive_re(ResourceID.INDICATOR_ICON_VIEW)
@@ -2388,7 +2396,17 @@ class OpenedPostView:
         obj.double_click()
         UniversalActions.detect_block(self.device)
 
-        # 3. Wait for sidebar to flip to "Liked" (up to 5s)
+        # 3. Screenshot-based verification (fast, reliable on Reels)
+        if str(getattr(args, "use_screenshot_like_reels", "true")).lower() not in ("false", "0", "no"):
+            screenshot_result = self._check_if_liked_by_screenshot()
+            if screenshot_result is True:
+                logger.debug("like_video: screenshot confirms liked")
+                return True
+            if screenshot_result is False:
+                logger.debug("like_video: screenshot confirms NOT liked")
+                # Don't return False yet — fall through to other checks
+
+        # 4. Wait for sidebar to flip to "Liked" (fallback, rarely works on Reels)
         liked_selector = self.device.find(
             resourceIdMatches=case_insensitive_re(ResourceID.LIKE_BUTTON),
             descriptionMatches=case_insensitive_re("^Liked$"),
@@ -2398,7 +2416,7 @@ class OpenedPostView:
         if appeared:
             return True
 
-        # 4. Reveal chrome and read raw button state
+        # 5. Reveal chrome and read raw button state
         post_liked, post_btn = self._is_video_liked_with_reveal()
         if post_btn is not None:
             post_info = post_btn.viewV2.info

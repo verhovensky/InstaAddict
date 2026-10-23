@@ -408,4 +408,16 @@ class CoreArguments(Plugin):
                 "help": "don't ask the user to press enter to continue with an untested IG version",
                 "action": "store_true",
             },
+            {
+                "arg": "--use-screenshot-like-reels",
+                "help": "use screenshot pixel analysis to verify Reels likes (default: enabled). Set to 'false' in config to disable.",
+                "nargs": "?",
+                "metavar": "true/false",
+                "default": "true",
+            },
+            {
+                "arg": "--use-screenshot-like-posts",
+                "help": "use screenshot pixel analysis to verify feed post likes (default: disabled, placeholder)",
+                "action": "store_true",
+            },
         ]

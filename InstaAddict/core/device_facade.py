@@ -208,6 +208,57 @@ class DeviceFacade:
         else:
             self.deviceV2.screenshot(path)
 
+    @staticmethod
+    def is_heart_liked_by_screenshot(
+        device,
+        like_button_view,
+        red_threshold: float = 0.15,
+    ) -> Optional[bool]:
+        """
+        Crop the like button area from a screenshot and check if the heart
+        is filled red (liked) or outline-only (not liked).
+
+        Returns True if red ratio >= threshold, False if below, None on error.
+        The full screenshot is discarded immediately after cropping.
+        """
+        try:
+            bounds = like_button_view.viewV2.info.get("visibleBounds")
+            if not bounds:
+                bounds = like_button_view.viewV2.info.get("bounds")
+            if not bounds:
+                logger.debug("is_heart_liked_by_screenshot: no bounds")
+                return None
+            left, top = bounds["left"], bounds["top"]
+            right, bottom = bounds["right"], bounds["bottom"]
+            if right <= left or bottom <= top:
+                logger.debug("is_heart_liked_by_screenshot: invalid bounds")
+                return None
+
+            img = device.deviceV2.screenshot()  # PIL Image, full screen
+            cropped = img.crop((left, top, right, bottom))
+            del img  # free full screenshot immediately
+
+            pixels = list(cropped.getdata())
+            total = len(pixels)
+            if total == 0:
+                return None
+            red_count = 0
+            for px in pixels:
+                r, g, b = px[0], px[1], px[2]
+                if r > 200 and g < 100 and b < 100:
+                    red_count += 1
+            ratio = red_count / total
+
+            liked = ratio >= red_threshold
+            logger.debug(
+                f"screenshot like check: red_ratio={ratio:.2f}, "
+                f"threshold={red_threshold}, liked={liked}"
+            )
+            return liked
+        except Exception as e:
+            logger.debug(f"is_heart_liked_by_screenshot error: {e}")
+            return None
+
     def dump_hierarchy(self, path):
         xml_dump = self.deviceV2.dump_hierarchy()
         with open(path, "w", encoding="utf-8") as outfile:
